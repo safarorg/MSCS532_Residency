@@ -99,6 +99,10 @@ class Drone(object):
     of the orders already in its order list, plus the given new_order (which
     would be added to the order list at the given position).
     """
+    simulated_orders = self.orders.copy()
+    simulated_orders.insert(position, new_order)
+    battery = self.run_trip(simulated_orders, True)
+    return battery if battery >= 0 else -1
 
   def find_best_order_position(self, new_order):
     """
@@ -108,6 +112,14 @@ class Drone(object):
     no positions where the order can be added without the drone failing its
     trip, returns -1.
     """
+    best_position = -1
+    best_battery = -1
+    for i in range(len(self.orders) + 1):
+      battery = self.simulate_trip_with_added_order(new_order, i)
+      if battery > best_battery:
+        best_battery = battery
+        best_position = i
+    return best_position
 
   def recharge(self):
     """Sets the battery to full (1)."""
