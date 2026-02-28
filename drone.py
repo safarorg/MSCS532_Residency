@@ -6,8 +6,9 @@ from delivery_zones import DeliveryZones
 
 class Drone(object):
 
-  def __init__(self, delivery_zones):
+  def __init__(self, delivery_zones, weight_limit=10000):
     self.delivery_zones = delivery_zones
+    self.weight_limit = weight_limit  # hard payload cap in grams
     self.battery_charge = 1
     self.orders = []
 
