@@ -1,4 +1,5 @@
 import csv
+import heapq
 from drone import DeliveryException
 from drone import Drone
 from order import Order
@@ -29,7 +30,8 @@ class DispatchServer(object):
         trip = self.build_most_optimal_trip()
       else:
         earliest_order = self.unpackaged_orders[0]
-        trip = self.build_trip(earliest_order.get_delivery_zone())
+        trip = self.build_trip(
+          earliest_order.get_delivery_zone())
 
       # Exit the loop if no orders are added to the trip
       if not trip:
@@ -64,90 +66,119 @@ class DispatchServer(object):
     destined for this same zone from heaviest to lightest (regardless of when
     the order was placed).
     """
-    zone_orders = [o for o in self.unpackaged_orders if o.get_delivery_zone() == zone]
+    # unpackaged_orders is already sorted by timestamp (from package_trips)
+    zone_orders = [o for o in self.unpackaged_orders
+                    if o.get_delivery_zone() == zone]
 
-    self.payload_test_drone.remove_all_orders()
     trip = []
+    remaining_for_phase2 = []
 
-    # Add oldest orders first until one exceeds range
-    for order in zone_orders:
-      best_pos = self.payload_test_drone.find_best_order_position(order)
-      if best_pos >= 0:
-        self.payload_test_drone.add_order(order, best_pos)
+    # Phase 1: Add oldest orders while battery permits; stop at first failure
+    for i, order in enumerate(zone_orders):
+      pos = len(self.payload_test_drone.get_orders())
+      result = self.payload_test_drone.simulate_trip_with_added_order(
+          order, pos)
+      if result >= 0:                          # FIX: -1 is falsy but means failure
+        self.payload_test_drone.add_order(
+            order, pos)  # FIX: accumulate state
         trip.append(order)
       else:
+        # this order and all after
+        remaining_for_phase2 = zone_orders[i:]
         break
 
-    # Fill remaining capacity with other zone orders, heaviest to lightest
-    remaining = [o for o in zone_orders if o not in trip]
-    remaining.sort(key=lambda o: o.get_weight(), reverse=True)
-    for order in remaining:
-      best_pos = self.payload_test_drone.find_best_order_position(order)
-      if best_pos >= 0:
-        self.payload_test_drone.add_order(order, best_pos)
+    # Phase 2: Fill remaining capacity heaviest-to-lightest
+    remaining_for_phase2.sort(
+        key=lambda o: o.get_weight(), reverse=True)
+    for order in remaining_for_phase2:
+      # FIX: use current count
+      pos = len(self.payload_test_drone.get_orders())
+      result = self.payload_test_drone.simulate_trip_with_added_order(
+        order, pos)
+      if result >= 0:
+        self.payload_test_drone.add_order(order, pos)
         trip.append(order)
 
-    self.payload_test_drone.remove_all_orders()
+    self.payload_test_drone.remove_all_orders()         # FIX: always reset
     return trip
 
   def build_most_optimal_trip(self):
     """
-    Returns the most optimal Trip, addressing:
-    - Perishable goods at front of queue
-    - Subscriber priority
-    - Same customer orders together (when they fit)
-    - Never mix fragile and hazardous in same trip
+    Returns the most optimal Trip using a Priority Queue + Customer Grouping
+    algorithm.
+
+    Algorithm:
+      1. Sort all unpackaged orders by urgency:
+          perishable > subscriber > oldest timestamp.
+      2. Group orders by user_id (hash map) so each customer's orders travel
+          together wherever possible.
+      3. Push each user group onto a min-heap keyed by its top-order priority.
+      4. Pop groups in priority order; enforce the fragile/hazardous
+          co-existence constraint; insert each fitting order at its optimal
+          position (find_best_order_position) to minimize battery consumption.
+
+    Time complexity: O(n log n) overall (dominated by the initial sort).
+    Space complexity: O(n) for the group map and heap.
     """
-    if not self.unpackaged_orders:
-      return []
+    # Step 1: Sort by urgency (perishable first, then subscriber, then oldest)
+    sorted_orders = sorted(
+        self.unpackaged_orders,
+        key=lambda o: (0 if o.is_perishable() else 1,
+                        0 if o.is_subscriber() else 1,
+                        o.get_timestamp())
+    )
 
-    # Sort: perishable first, subscriber second, timestamp third (front of queue)
-    sorted_orders = sorted(self.unpackaged_orders,
-        key=lambda o: (not o.is_perishable(), not o.is_subscriber(), o.get_timestamp()))
+    # Step 2: Group by user_id using a dict (hash map)
+    user_groups = {}
+    for order in sorted_orders:
+        uid = order.get_user_id()
+        if uid not in user_groups:
+            user_groups[uid] = []
+        user_groups[uid].append(order)
 
-    first = sorted_orders[0]
+    # Step 3: Push each group onto the min-heap
+    # Heap key: (perishable_flag, subscriber_flag, timestamp, uid)
+    # uid is appended as an integer tiebreaker to avoid comparing lists
+    heap = []
+    for uid, group in user_groups.items():
+        # highest-priority order in this group (from Step 1 sort)
+        top = group[0]
+        score = (0 if top.is_perishable() else 1,
+                  0 if top.is_subscriber() else 1,
+                  top.get_timestamp(),
+                  uid)
+        heapq.heappush(heap, score)
 
-    # Trip type: never mix fragile and hazardous
-    if first.is_fragile():
-      trip_type = 'no_hazardous'
-    elif first.is_hazardous():
-      trip_type = 'no_fragile'
-    else:
-      trip_type = 'any'
-
-    def can_add(order):
-      if trip_type == 'no_hazardous':
-        return not order.is_hazardous()
-      elif trip_type == 'no_fragile':
-        return not order.is_fragile()
-      return True
-
-    self.payload_test_drone.remove_all_orders()
+    # Step 4: Greedily build one trip by processing groups in priority order
     trip = []
+    trip_has_fragile = False
+    trip_has_hazardous = False
 
-    # Add all same-customer orders first (unless they can't all fit)
-    customer_id = first.get_user_id()
-    customer_orders = [o for o in sorted_orders if o.get_user_id() == customer_id and can_add(o)]
-    for order in customer_orders:
-      best_pos = self.payload_test_drone.find_best_order_position(order)
+    while heap:
+      entry = heapq.heappop(heap)
+      uid = entry[3]
+      group = user_groups[uid]
+
+      # Enforce fragile/hazardous constraint: fragile and hazardous goods
+      # must not travel on the same trip
+      group_fragile = any(o.is_fragile() for o in group)
+      group_hazardous = any(o.is_hazardous() for o in group)
+      if (trip_has_fragile and group_hazardous) or \
+              (trip_has_hazardous and group_fragile):
+          continue  # defer this group to a future trip
+
+    # Try to add each order from this customer at its optimal position
+    for order in group:
+      best_pos = self.payload_test_drone.find_best_order_position(
+          order)
       if best_pos >= 0:
         self.payload_test_drone.add_order(order, best_pos)
-        trip.append(order)
-      else:
-        break
+        trip_has_fragile = trip_has_fragile or order.is_fragile()
+        trip_has_hazardous = trip_has_hazardous or order.is_hazardous()
 
-    # Fill remaining capacity: other orders by priority, then heaviest to lightest
-    remaining = [o for o in sorted_orders if o not in trip and can_add(o)]
-    remaining.sort(key=lambda o: (not o.is_perishable(), not o.is_subscriber(),
-        o.get_timestamp(), -o.get_weight()))
-    for order in remaining:
-      best_pos = self.payload_test_drone.find_best_order_position(order)
-      if best_pos >= 0:
-        self.payload_test_drone.add_order(order, best_pos)
-        trip.append(order)
-
-    # Return orders in optimal delivery order (as positioned by find_best_order_position)
-    trip = self.payload_test_drone.get_orders().copy()
+    # Return orders in the optimized delivery sequence that find_best_order_position
+    # computed, not in the processing order — the delivery drone must fly this sequence
+    trip = list(self.payload_test_drone.get_orders())
     self.payload_test_drone.remove_all_orders()
     return trip
 
