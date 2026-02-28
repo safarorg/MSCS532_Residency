@@ -94,23 +94,10 @@ class DispatchServer(object):
     # Already in priority order from heap (priority_score, timestamp, delivery_zone, order_id)
     first = orders[0]
 
-    # Trip type: never mix fragile and hazardous
-    if first.is_fragile():
-      trip_type = 'no_hazardous'
-    elif first.is_hazardous():
-      trip_type = 'no_fragile'
-    else:
-      trip_type = 'any'
-
-    def can_add(order):
-      if trip_type == 'no_hazardous':
-        return not order.is_hazardous()
-      elif trip_type == 'no_fragile':
-        return not order.is_fragile()
-      return True
-
-    self.payload_test_drone.remove_all_orders()
+    # Step 4: Greedily build one trip by processing groups in priority order
     trip = []
+    trip_has_fragile = False
+    trip_has_hazardous = False
 
     # Add all same-customer orders first (unless they can't all fit)
     customer_id = first.get_user_id()
@@ -119,9 +106,8 @@ class DispatchServer(object):
       best_pos = self.payload_test_drone.find_best_order_position(order)
       if best_pos >= 0:
         self.payload_test_drone.add_order(order, best_pos)
-        trip.append(order)
-      else:
-        break
+        trip_has_fragile = trip_has_fragile or order.is_fragile()
+        trip_has_hazardous = trip_has_hazardous or order.is_hazardous()
 
     # Fill remaining capacity: already in priority order; sort by heaviest to lightest
     remaining = [o for o in orders if o not in trip and can_add(o)]
