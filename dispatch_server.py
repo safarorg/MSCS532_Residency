@@ -64,6 +64,31 @@ class DispatchServer(object):
     destined for this same zone from heaviest to lightest (regardless of when
     the order was placed).
     """
+    zone_orders = [o for o in self.unpackaged_orders if o.get_delivery_zone() == zone]
+
+    self.payload_test_drone.remove_all_orders()
+    trip = []
+
+    # Add oldest orders first until one exceeds range
+    for order in zone_orders:
+      best_pos = self.payload_test_drone.find_best_order_position(order)
+      if best_pos >= 0:
+        self.payload_test_drone.add_order(order, best_pos)
+        trip.append(order)
+      else:
+        break
+
+    # Fill remaining capacity with other zone orders, heaviest to lightest
+    remaining = [o for o in zone_orders if o not in trip]
+    remaining.sort(key=lambda o: o.get_weight(), reverse=True)
+    for order in remaining:
+      best_pos = self.payload_test_drone.find_best_order_position(order)
+      if best_pos >= 0:
+        self.payload_test_drone.add_order(order, best_pos)
+        trip.append(order)
+
+    self.payload_test_drone.remove_all_orders()
+    return trip
 
   def build_most_optimal_trip(self):
     """Returns the most optimal Trip."""
