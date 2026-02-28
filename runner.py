@@ -26,14 +26,9 @@ class Runner:
     bad_order_position = test_drone.find_best_order_position(test_bad_order)
     print("Accommodates bad order: ", bad_order_position >= 0)
 
-    print("\n*** Basic Delivery ***\n")
-    dispatch_server.package_trips(False)
-    dispatch_server.deliver_orders()  # Release the drones!
-
-    print("\n*** Optimized Delivery ***\n")
-    dispatch_server.load_orders("deliveries.csv")
-    dispatch_server.package_trips(True)
-    dispatch_server.deliver_orders()  # Release the drones!
+    print("\n*** Delivery ***\n")
+    dispatch_server.package_trips()
+    dispatch_server.deliver_orders()
 
     #  Feel free to put any println statements below for testing and debugging
 

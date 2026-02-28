@@ -23,30 +23,12 @@ class DispatchServer(object):
     priority_score = (0 if order.is_perishable() else 2) + (0 if order.is_subscriber() else 1)
     return (priority_score, order.get_timestamp(), order.get_delivery_zone(), order.get_order_id())
 
-  def package_trips(self, most_optimal):
+  def package_trips(self):
     """
-    Uses build_trip (or build_most_optimal_trip) to organize the
-    unpackaged orders into a list of packaged trips.
-    Simple and optimal paths are independent: simple uses unpackaged_orders
-    directly; optimal uses whatever order list is passed to build_most_optimal_trip.
+    Organizes unpackaged orders into trips using the priority queue (min-heap).
+    Orders are dequeued by (priority_score, timestamp, delivery_zone, order_id).
     """
-    if most_optimal:
-      self._package_trips_optimal()
-    else:
-      self._package_trips_simple()
-
-  def _package_trips_simple(self):
-    """Simple path: FIFO by timestamp, zone-based trips. Uses only unpackaged_orders."""
-    self.unpackaged_orders.sort(key=lambda o: o.get_timestamp())
-
-    while self.unpackaged_orders:
-      earliest_order = self.unpackaged_orders[0]
-      trip = self.build_trip(earliest_order.get_delivery_zone())
-      if not trip:
-        break
-      for order in trip:
-        self.unpackaged_orders.remove(order)
-      self.trips.append(trip)
+    self._package_trips_optimal()
 
   def _package_trips_optimal(self):
     """
@@ -95,41 +77,6 @@ class DispatchServer(object):
         print(e)
         return
       self.delivery_drone.recharge()
-
-
-  def build_trip(self, zone):
-    """
-    Returns a Trip containing as many of the oldest unpackaged Orders in the
-    zone as possible without exceeding the drone's range. Once an order exceeds
-    the drone's range, any remaining capacity should be filled with other orders
-    destined for this same zone from heaviest to lightest (regardless of when
-    the order was placed).
-    """
-    zone_orders = [o for o in self.unpackaged_orders if o.get_delivery_zone() == zone]
-
-    self.payload_test_drone.remove_all_orders()
-    trip = []
-
-    # Add oldest orders first until one exceeds range
-    for order in zone_orders:
-      best_pos = self.payload_test_drone.find_best_order_position(order)
-      if best_pos >= 0:
-        self.payload_test_drone.add_order(order, best_pos)
-        trip.append(order)
-      else:
-        break
-
-    # Fill remaining capacity with other zone orders, heaviest to lightest
-    remaining = [o for o in zone_orders if o not in trip]
-    remaining.sort(key=lambda o: o.get_weight(), reverse=True)
-    for order in remaining:
-      best_pos = self.payload_test_drone.find_best_order_position(order)
-      if best_pos >= 0:
-        self.payload_test_drone.add_order(order, best_pos)
-        trip.append(order)
-
-    self.payload_test_drone.remove_all_orders()
-    return trip
 
   def build_most_optimal_trip(self, orders):
     """
