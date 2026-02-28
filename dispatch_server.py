@@ -91,9 +91,65 @@ class DispatchServer(object):
     return trip
 
   def build_most_optimal_trip(self):
-    """Returns the most optimal Trip."""
-    # TODO: Implement
-    return []
+    """
+    Returns the most optimal Trip, addressing:
+    - Perishable goods at front of queue
+    - Subscriber priority
+    - Same customer orders together (when they fit)
+    - Never mix fragile and hazardous in same trip
+    """
+    if not self.unpackaged_orders:
+      return []
+
+    # Sort: perishable first, subscriber second, timestamp third (front of queue)
+    sorted_orders = sorted(self.unpackaged_orders,
+        key=lambda o: (not o.is_perishable(), not o.is_subscriber(), o.get_timestamp()))
+
+    first = sorted_orders[0]
+
+    # Trip type: never mix fragile and hazardous
+    if first.is_fragile():
+      trip_type = 'no_hazardous'
+    elif first.is_hazardous():
+      trip_type = 'no_fragile'
+    else:
+      trip_type = 'any'
+
+    def can_add(order):
+      if trip_type == 'no_hazardous':
+        return not order.is_hazardous()
+      elif trip_type == 'no_fragile':
+        return not order.is_fragile()
+      return True
+
+    self.payload_test_drone.remove_all_orders()
+    trip = []
+
+    # Add all same-customer orders first (unless they can't all fit)
+    customer_id = first.get_user_id()
+    customer_orders = [o for o in sorted_orders if o.get_user_id() == customer_id and can_add(o)]
+    for order in customer_orders:
+      best_pos = self.payload_test_drone.find_best_order_position(order)
+      if best_pos >= 0:
+        self.payload_test_drone.add_order(order, best_pos)
+        trip.append(order)
+      else:
+        break
+
+    # Fill remaining capacity: other orders by priority, then heaviest to lightest
+    remaining = [o for o in sorted_orders if o not in trip and can_add(o)]
+    remaining.sort(key=lambda o: (not o.is_perishable(), not o.is_subscriber(),
+        o.get_timestamp(), -o.get_weight()))
+    for order in remaining:
+      best_pos = self.payload_test_drone.find_best_order_position(order)
+      if best_pos >= 0:
+        self.payload_test_drone.add_order(order, best_pos)
+        trip.append(order)
+
+    # Return orders in optimal delivery order (as positioned by find_best_order_position)
+    trip = self.payload_test_drone.get_orders().copy()
+    self.payload_test_drone.remove_all_orders()
+    return trip
 
   def load_orders(self, csv_file_name):
     print('Loading order info from ' + csv_file_name)
