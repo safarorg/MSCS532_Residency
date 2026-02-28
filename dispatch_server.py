@@ -1,4 +1,5 @@
 import csv
+import heapq
 from drone import DeliveryException
 from drone import Drone
 from order import Order
@@ -12,6 +13,15 @@ class DispatchServer(object):
     self.unpackaged_orders = []
     self.delivery_drone = Drone(delivery_zones)
     self.payload_test_drone = Drone(delivery_zones)
+
+  def _priority_key(self, order):
+    """
+    Composite key for the optimal-path min-heap: (priority_score, timestamp, delivery_zone, order_id).
+    Lower priority_score = higher urgency. delivery_zone then order_id as tiebreakers;
+    order_id guarantees a total order and deterministic heap behavior.
+    """
+    priority_score = (0 if order.is_perishable() else 2) + (0 if order.is_subscriber() else 1)
+    return (priority_score, order.get_timestamp(), order.get_delivery_zone(), order.get_order_id())
 
   def package_trips(self, most_optimal):
     """
@@ -39,13 +49,36 @@ class DispatchServer(object):
       self.trips.append(trip)
 
   def _package_trips_optimal(self):
-    """Optimal path: priority-based trips. Uses orders passed to build_most_optimal_trip."""
-    while self.unpackaged_orders:
-      trip = self.build_most_optimal_trip(self.unpackaged_orders)
+    """
+    Optimal path: min-heap priority queue. Orders dequeued by (priority_score,
+    timestamp, delivery_zone, order_id). heapq.heappush/heappop maintain the heap invariant.
+    """
+    # Load orders into min-heap with composite key (priority_score, timestamp, delivery_zone, order_id)
+    heap = []
+    for order in self.unpackaged_orders:
+      key = self._priority_key(order)
+      heapq.heappush(heap, (key, order))
+
+    while heap:
+      # Pop all from heap; they come out in priority order.
+      items = [heapq.heappop(heap) for _ in range(len(heap))]
+      orders_only = [o for _, o in items]
+
+      trip = self.build_most_optimal_trip(orders_only)
       if not trip:
+        # No trip could be built; put all back and stop.
+        for key, o in items:
+          heapq.heappush(heap, (key, o))
         break
+
+      # Remove trip orders from unpackaged_orders; push back the rest to heap.
       for order in trip:
         self.unpackaged_orders.remove(order)
+      trip_set = set(trip)
+      for key, o in items:
+        if o not in trip_set:
+          heapq.heappush(heap, (key, o))
+
       self.trips.append(trip)
 
   def deliver_orders(self):
