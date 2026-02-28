@@ -17,27 +17,35 @@ class DispatchServer(object):
     """
     Uses build_trip (or build_most_optimal_trip) to organize the
     unpackaged orders into a list of packaged trips.
+    Simple and optimal paths are independent: simple uses unpackaged_orders
+    directly; optimal uses whatever order list is passed to build_most_optimal_trip.
     """
-    # Sort orders by submitted time
+    if most_optimal:
+      self._package_trips_optimal()
+    else:
+      self._package_trips_simple()
+
+  def _package_trips_simple(self):
+    """Simple path: FIFO by timestamp, zone-based trips. Uses only unpackaged_orders."""
     self.unpackaged_orders.sort(key=lambda o: o.get_timestamp())
 
     while self.unpackaged_orders:
-      trip = []
-
-      # Build a trip
-      if most_optimal:
-        trip = self.build_most_optimal_trip()
-      else:
-        earliest_order = self.unpackaged_orders[0]
-        trip = self.build_trip(earliest_order.get_delivery_zone())
-
-      # Exit the loop if no orders are added to the trip
+      earliest_order = self.unpackaged_orders[0]
+      trip = self.build_trip(earliest_order.get_delivery_zone())
       if not trip:
         break
-
       for order in trip:
         self.unpackaged_orders.remove(order)
+      self.trips.append(trip)
 
+  def _package_trips_optimal(self):
+    """Optimal path: priority-based trips. Uses orders passed to build_most_optimal_trip."""
+    while self.unpackaged_orders:
+      trip = self.build_most_optimal_trip(self.unpackaged_orders)
+      if not trip:
+        break
+      for order in trip:
+        self.unpackaged_orders.remove(order)
       self.trips.append(trip)
 
   def deliver_orders(self):
@@ -90,19 +98,20 @@ class DispatchServer(object):
     self.payload_test_drone.remove_all_orders()
     return trip
 
-  def build_most_optimal_trip(self):
+  def build_most_optimal_trip(self, orders):
     """
-    Returns the most optimal Trip, addressing:
+    Returns the most optimal Trip from the given orders list, addressing:
     - Perishable goods at front of queue
     - Subscriber priority
     - Same customer orders together (when they fit)
     - Never mix fragile and hazardous in same trip
+    Does not mutate orders; caller is responsible for removing trip orders.
     """
-    if not self.unpackaged_orders:
+    if not orders:
       return []
 
     # Sort: perishable first, subscriber second, timestamp third (front of queue)
-    sorted_orders = sorted(self.unpackaged_orders,
+    sorted_orders = sorted(orders,
         key=lambda o: (not o.is_perishable(), not o.is_subscriber(), o.get_timestamp()))
 
     first = sorted_orders[0]

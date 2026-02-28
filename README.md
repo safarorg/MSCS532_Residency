@@ -17,6 +17,17 @@ The system manages drone deliveries across multiple zones. It packages orders in
   - Fragile and hazardous orders never in the same trip
   - Perishable goods moved to the front of the queue
 
+## Priority logic
+
+`priority_score` is a single number; lower value means higher urgency:
+
+| Score | Meaning                |
+|------:|------------------------|
+| 0     | perishable + subscriber |
+| 1     | perishable only        |
+| 2     | subscriber only        |
+| 3     | neither                |
+
 ## Project Structure
 
 ```
