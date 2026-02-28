@@ -86,15 +86,13 @@ class DispatchServer(object):
     - Same customer orders together (when they fit)
     - Never mix fragile and hazardous in same trip
     Does not mutate orders; caller is responsible for removing trip orders.
+    Expects orders to already be in priority order (e.g. from the min-heap).
     """
     if not orders:
       return []
 
-    # Sort: perishable first, subscriber second, timestamp third (front of queue)
-    sorted_orders = sorted(orders,
-        key=lambda o: (not o.is_perishable(), not o.is_subscriber(), o.get_timestamp()))
-
-    first = sorted_orders[0]
+    # Already in priority order from heap (priority_score, timestamp, delivery_zone, order_id)
+    first = orders[0]
 
     # Trip type: never mix fragile and hazardous
     if first.is_fragile():
@@ -116,7 +114,7 @@ class DispatchServer(object):
 
     # Add all same-customer orders first (unless they can't all fit)
     customer_id = first.get_user_id()
-    customer_orders = [o for o in sorted_orders if o.get_user_id() == customer_id and can_add(o)]
+    customer_orders = [o for o in orders if o.get_user_id() == customer_id and can_add(o)]
     for order in customer_orders:
       best_pos = self.payload_test_drone.find_best_order_position(order)
       if best_pos >= 0:
@@ -125,10 +123,9 @@ class DispatchServer(object):
       else:
         break
 
-    # Fill remaining capacity: other orders by priority, then heaviest to lightest
-    remaining = [o for o in sorted_orders if o not in trip and can_add(o)]
-    remaining.sort(key=lambda o: (not o.is_perishable(), not o.is_subscriber(),
-        o.get_timestamp(), -o.get_weight()))
+    # Fill remaining capacity: already in priority order; sort by heaviest to lightest
+    remaining = [o for o in orders if o not in trip and can_add(o)]
+    remaining.sort(key=lambda o: -o.get_weight())
     for order in remaining:
       best_pos = self.payload_test_drone.find_best_order_position(order)
       if best_pos >= 0:
