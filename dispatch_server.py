@@ -158,9 +158,9 @@ class DispatchServer(object):
     trip_has_fragile = False
     trip_has_hazardous = False
 
-    # Phase 1: Add all same-customer orders first (when they satisfy constraints)
+    # Lazy customer consolidation: iterate same-customer orders on demand; stop when one doesn't fit.
     customer_id = first.get_user_id()
-    customer_orders = [o for o in orders if o.get_user_id() == customer_id]
+    customer_orders = (o for o in orders if o.get_user_id() == customer_id and can_add(o))
     for order in customer_orders:
       if order.is_fragile() and trip_has_hazardous:
         continue
@@ -173,10 +173,9 @@ class DispatchServer(object):
         trip_has_fragile = trip_has_fragile or order.is_fragile()
         trip_has_hazardous = trip_has_hazardous or order.is_hazardous()
 
-    # Phase 2: Fill remaining capacity, heaviest first
-    already_added = set(id(o) for o in trip)
-    remaining = [o for o in orders if id(o) not in already_added]
-    remaining.sort(key=lambda o: -o.get_weight())
+    # Fill remaining capacity: heaviest to lightest, with zone and order_id for stable sort.
+    remaining = [o for o in orders if o not in trip and can_add(o)]
+    remaining.sort(key=lambda o: (-o.get_weight(), o.get_delivery_zone(), o.get_order_id()))
     for order in remaining:
       if order.is_fragile() and trip_has_hazardous:
         continue

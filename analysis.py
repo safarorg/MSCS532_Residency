@@ -7,6 +7,7 @@ produces a PNG chart and a CSV summary.
 Usage:
     python analysis.py
 """
+
 import csv
 import time
 
