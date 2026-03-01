@@ -108,8 +108,13 @@ class DispatchServer(object):
     Sort all unpackaged orders once by sort_keys, then greedily fill trips
     using build_trip until no orders remain or none can fit.
     """
-    orders = sorted(self.unpackaged_orders,
-                    key=lambda o: self.build_composite_key(o, sort_keys))
+    heap = []
+    for order in self.unpackaged_orders:
+      heapq.heappush(heap, (self.build_composite_key(order, sort_keys), order))
+    orders = []
+    while heap:
+      _, order = heapq.heappop(heap)
+      orders.append(order)
     while orders:
       trip = self.build_trip(orders)
       if not trip:
