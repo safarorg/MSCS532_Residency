@@ -112,9 +112,9 @@ class DispatchServer(object):
     self.payload_test_drone.remove_all_orders()
     trip = []
 
-    # Add all same-customer orders first (unless they can't all fit)
+    # Lazy customer consolidation: iterate same-customer orders on demand; stop when one doesn't fit.
     customer_id = first.get_user_id()
-    customer_orders = [o for o in orders if o.get_user_id() == customer_id and can_add(o)]
+    customer_orders = (o for o in orders if o.get_user_id() == customer_id and can_add(o))
     for order in customer_orders:
       best_pos = self.payload_test_drone.find_best_order_position(order)
       if best_pos >= 0:
@@ -123,9 +123,9 @@ class DispatchServer(object):
       else:
         break
 
-    # Fill remaining capacity: already in priority order; sort by heaviest to lightest
+    # Fill remaining capacity: heaviest to lightest, with zone and order_id for stable sort.
     remaining = [o for o in orders if o not in trip and can_add(o)]
-    remaining.sort(key=lambda o: -o.get_weight())
+    remaining.sort(key=lambda o: (-o.get_weight(), o.get_delivery_zone(), o.get_order_id()))
     for order in remaining:
       best_pos = self.payload_test_drone.find_best_order_position(order)
       if best_pos >= 0:

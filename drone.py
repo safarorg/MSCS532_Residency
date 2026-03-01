@@ -1,7 +1,18 @@
 import time
 import traceback
+from functools import lru_cache
 
 from delivery_zones import DeliveryZones
+
+# Memoized battery drain: (weight, distance) -> fraction of battery. Shared across all drones.
+CONSUMPTION_FACTOR = 36739
+EMPTY_OVERHEAD = 512
+
+
+@lru_cache(maxsize=None)
+def _battery_drain(weight, distance):
+  """Pure function: fraction of battery consumed for this segment. Cached by (weight, distance)."""
+  return distance * (weight + EMPTY_OVERHEAD) / CONSUMPTION_FACTOR
 
 
 class Drone(object):
@@ -128,13 +139,9 @@ class Drone(object):
   def get_percent_battery_required(self, weight, distance):
     """
     Given a payload weight in grams and a distance in kilometers, returns
-    the percent of drone range this flight would consume.
-
-    A value of 1 indicates that the drone's entire battery is consumed.
+    the fraction of battery this segment would consume. Memoized by (weight, distance).
     """
-    empty_overhead = 512
-    consumption_factor = 36739
-    return distance * (weight + empty_overhead) / consumption_factor
+    return _battery_drain(weight, distance)
 
 
 class DeliveryException(Exception):
