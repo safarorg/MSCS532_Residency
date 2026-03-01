@@ -86,7 +86,7 @@ class DeliveryAnalyzer:
         server.load_orders(csv_file)
 
         t_start = time.perf_counter()
-        server.package_trips(sort_keys)
+        server.schedule_orders(sort_keys)
         t_end = time.perf_counter()
         runtime_ms = (t_end - t_start) * 1000
 

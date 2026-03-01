@@ -22,7 +22,7 @@ class DispatchServer(object):
     self.delivery_drone = Drone(delivery_zones)
     self.payload_test_drone = Drone(delivery_zones)
 
-  def _priority_key(self, order, sort_keys):
+  def build_composite_key(self, order, sort_keys):
     """
     Composite key for the optimal-path min-heap built dynamically from sort_keys.
     Always appends order_id as the deterministic final tiebreaker.
@@ -50,13 +50,16 @@ class DispatchServer(object):
     self.payload_test_drone.remove_all_orders()
     return trip
 
-  def _package_trips_simple(self, sort_keys):
+  def schedule_orders(self, sort_keys):
     """
+    Sorts unpackaged orders by sort_keys and greedily builds trips using
+    build_trip (battery + weight constraints only).
+    
     Sort all unpackaged orders once by sort_keys, then greedily fill trips
     using build_trip until no orders remain or none can fit.
     """
     orders = sorted(self.unpackaged_orders,
-                    key=lambda o: self._priority_key(o, sort_keys))
+                    key=lambda o: self.build_composite_key(o, sort_keys))
     while orders:
       trip = self.build_trip(orders)
       if not trip:
@@ -64,13 +67,6 @@ class DispatchServer(object):
       trip_set = set(id(o) for o in trip)
       orders = [o for o in orders if id(o) not in trip_set]
       self.trips.append(trip)
-
-  def package_trips(self, sort_keys):
-    """
-    Sorts unpackaged orders by sort_keys and greedily builds trips using
-    build_trip (battery + weight constraints only).
-    """
-    self._package_trips_simple(sort_keys)
 
   def deliver_orders(self):
     """Uses the delivery_drone to deliver all of the packaged trips."""

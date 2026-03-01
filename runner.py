@@ -27,7 +27,7 @@ class Runner:
     print("Accommodates bad order: ", bad_order_position >= 0)
 
     print("\n*** Delivery ***\n")
-    dispatch_server.package_trips(['priority_score', 'timestamp', 'delivery_zone'])
+    dispatch_server.schedule_orders(['priority_score', 'timestamp', 'delivery_zone'])
     dispatch_server.deliver_orders()
 
     #  Feel free to put any println statements below for testing and debugging
